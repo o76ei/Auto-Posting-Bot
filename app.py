@@ -7,17 +7,17 @@ from flask import Flask, request, jsonify, send_file
 from pyrogram import Client, filters
 from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, PhoneCodeExpired
 import logging
- 
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
- 
+
 BOT_TOKEN   = os.environ.get("BOT_TOKEN")
 API_ID      = int(os.environ.get("API_ID", 0))
 API_HASH    = os.environ.get("API_HASH", "")
 BASE_URL    = os.environ.get("BASE_URL", "").rstrip("/")
- 
+
 flask_app = Flask(__name__)
- 
+
 # ── in-memory stores ──────────────────────────────────────────────────────────
 sessions      = {}   # phone -> session_string
 user_tokens   = {}   # telegram_user_id -> access_token
@@ -27,13 +27,13 @@ user_clients  = {}
 user_code_hash= {}
 token_phone   = {}   # access_token -> phone  (for API auth)
 token_session = {}   # access_token -> session_string
- 
+
 WAIT_PHONE    = "WAIT_PHONE"
 WAIT_CODE     = "WAIT_CODE"
 WAIT_PASSWORD = "WAIT_PASSWORD"
- 
+
 bot = None
- 
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 def get_token_from_request():
     """Extract token from ?token= query param or Authorization header."""
@@ -43,11 +43,11 @@ def get_token_from_request():
         if auth.startswith("Bearer "):
             token = auth[7:]
     return token
- 
+
 def authorized_session(token):
     """Return session_string for token, or None if invalid."""
     return token_session.get(token)
- 
+
 # ── bot handlers ──────────────────────────────────────────────────────────────
 async def handle_start(client, message):
     user_id = message.from_user.id
@@ -55,15 +55,14 @@ async def handle_start(client, message):
     await message.reply(
         "👋 أهلاً بك في TG AutoBlast!\n\n"
         "أرسل رقم هاتفك مع رمز الدولة:\n"
-        "مثال: <code>+9647801234567</code>",
-        parse_mode="html"
+        "مثال: +9647801234567"
     )
- 
+
 async def handle_message(client, message):
     user_id = message.from_user.id
     text    = message.text.strip()
     state   = user_state.get(user_id)
- 
+
     if state == WAIT_PHONE:
         await handle_phone(message, user_id, text)
     elif state == WAIT_CODE:
@@ -72,7 +71,7 @@ async def handle_message(client, message):
         await handle_password(message, user_id, text)
     else:
         await message.reply("اكتب /start للبدء من جديد.")
- 
+
 async def handle_phone(message, user_id, phone):
     user_data[user_id] = {"phone": phone}
     try:
@@ -95,7 +94,7 @@ async def handle_phone(message, user_id, phone):
         logger.error(f"handle_phone error: {e}")
         await message.reply(f"❌ خطأ: {e}\nحاول مرة ثانية /start")
         user_state.pop(user_id, None)
- 
+
 async def handle_code(message, user_id, code):
     code       = code.replace(" ", "").replace("-", "")
     phone      = user_data[user_id]["phone"]
@@ -115,7 +114,7 @@ async def handle_code(message, user_id, code):
     except Exception as e:
         logger.error(f"handle_code error: {e}")
         await message.reply(f"❌ خطأ: {e}\nأرسل الرمز مرة ثانية:")
- 
+
 async def handle_password(message, user_id, password):
     password = password.replace(" ", "")
     pyro     = user_clients.get(user_id)
@@ -124,19 +123,19 @@ async def handle_password(message, user_id, password):
         await finish_login(message, user_id, pyro)
     except Exception as e:
         await message.reply(f"❌ كلمة المرور خاطئة: {e}\nحاول مرة ثانية:")
- 
+
 async def finish_login(message, user_id, pyro):
     phone       = user_data[user_id]["phone"]
     session_str = await pyro.export_session_string()
     token       = secrets.token_hex(24)
- 
+
     sessions[phone]      = session_str
     user_tokens[user_id] = token
     token_phone[token]   = phone
     token_session[token] = session_str
- 
+
     dashboard_url = f"{BASE_URL}/dashboard?token={token}"
- 
+
     from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("🚀 افتح لوحة التحكم", url=dashboard_url)
@@ -147,19 +146,19 @@ async def finish_login(message, user_id, pyro):
         reply_markup=keyboard
     )
     logger.info(f"User {user_id} logged in, phone={phone}")
- 
+
 # ── Flask routes ──────────────────────────────────────────────────────────────
 @flask_app.route("/")
 def index():
     return send_file("index.html")
- 
+
 @flask_app.route("/dashboard")
 def dashboard():
     token = request.args.get("token")
     if not token or token not in token_session:
         return "⛔ غير مصرح. ارجع للبوت واحصل على رابط جديد.", 403
     return send_file("index.html")
- 
+
 # ── /api/groups ───────────────────────────────────────────────────────────────
 @flask_app.route("/api/groups")
 def api_groups():
@@ -167,14 +166,14 @@ def api_groups():
     session_str = authorized_session(token)
     if not session_str:
         return jsonify({"error": "غير مصرح"}), 401
- 
+
     try:
         result = asyncio.run(_fetch_groups(session_str))
         return jsonify(result)
     except Exception as e:
         logger.error(f"api_groups error: {e}")
         return jsonify({"error": str(e)}), 500
- 
+
 async def _fetch_groups(session_str):
     groups = []
     async with Client(
@@ -194,7 +193,7 @@ async def _fetch_groups(session_str):
                     "icon":    "📢"
                 })
     return groups
- 
+
 # ── /api/stats ────────────────────────────────────────────────────────────────
 @flask_app.route("/api/stats")
 def api_stats():
@@ -210,7 +209,7 @@ def api_stats():
         "uptime":       "٣س ٤٢د",
         "activeGroups": 7
     })
- 
+
 # ── /api/launch ───────────────────────────────────────────────────────────────
 @flask_app.route("/api/launch", methods=["POST"])
 def api_launch():
@@ -218,31 +217,31 @@ def api_launch():
     session_str = authorized_session(token)
     if not session_str:
         return jsonify({"error": "غير مصرح"}), 401
- 
+
     data     = request.json or {}
     groups   = data.get("groups",   [])
     messages = data.get("messages", [])
     schedule = data.get("schedule", {})
- 
+
     if not groups:
         return jsonify({"error": "لم تختر أي مجموعة"}), 400
     if not messages:
         return jsonify({"error": "لم تكتب أي رسالة"}), 400
- 
+
     # Launch in background thread
     threading.Thread(
         target=_launch_worker,
         args=(session_str, groups, messages, schedule),
         daemon=True
     ).start()
- 
+
     return jsonify({"status": "ok", "message": "تم إطلاق الحملة ✅"})
- 
+
 def _launch_worker(session_str, groups, messages, schedule):
     """Runs in a background thread — sends messages to each group."""
     import time
     delay_sec = int(schedule.get("delay", 15)) * 60
- 
+
     async def _send():
         async with Client(
             name="sender_tmp",
@@ -261,14 +260,14 @@ def _launch_worker(session_str, groups, messages, schedule):
                     await asyncio.sleep(delay_sec)
                 except Exception as e:
                     logger.error(f"Send error to {group_id}: {e}")
- 
+
     asyncio.run(_send())
- 
+
 # ── run ───────────────────────────────────────────────────────────────────────
 def run_flask():
     port = int(os.environ.get("PORT", 5000))
     flask_app.run(host="0.0.0.0", port=port)
- 
+
 async def main():
     global bot
     bot = Client(
@@ -280,13 +279,13 @@ async def main():
     )
     bot.on_message(filters.command("start"))(handle_start)
     bot.on_message(filters.text & ~filters.command("start"))(handle_message)
- 
+
     t = threading.Thread(target=run_flask, daemon=True)
     t.start()
- 
+
     await bot.start()
     logger.info("✅ البوت شغال")
     await asyncio.get_event_loop().create_future()
- 
+
 if __name__ == "__main__":
     asyncio.run(main())
