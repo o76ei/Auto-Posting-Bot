@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -100,38 +100,8 @@ header {
 .btn-pause:hover { background:#a259ff28; box-shadow:var(--glow-p); }
 .btn-pause.paused { border-color:var(--blue); color:var(--blue); background:#38bfff15; }
 
-/* ── LANG TOGGLE ── */
-.lang-bar {
-  display:flex; align-items:center; justify-content:flex-end;
-  gap:10px; padding:10px 16px 4px;
-}
-.lang-label { font-size:11px; color:var(--muted); font-family:'DM Mono',monospace; letter-spacing:.1em; }
-.lang-toggle {
-  position:relative; width:52px; height:26px; cursor:pointer;
-}
-.lang-toggle input { opacity:0; width:0; height:0; }
-.lang-track {
-  position:absolute; inset:0; border-radius:99px;
-  background:var(--surface); border:1.5px solid var(--border);
-  transition:all .3s;
-}
-.lang-toggle input:checked ~ .lang-track {
-  background:#a259ff22; border-color:var(--purple);
-  box-shadow:0 0 12px #a259ff44;
-}
-.lang-thumb {
-  position:absolute; top:3px; left:3px;
-  width:18px; height:18px; border-radius:50%;
-  background:var(--muted); transition:all .3s;
-  display:flex; align-items:center; justify-content:center;
-  font-size:8px; font-weight:700; color:#fff; letter-spacing:0;
-}
-.lang-toggle input:checked ~ .lang-track ~ .lang-thumb,
-.lang-toggle input:checked + .lang-track + .lang-thumb {
-  left:28px; background:var(--purple);
-}
-/* fix stacking — thumb sits after track in DOM */
-.lang-thumb { pointer-events:none; }
+/* ── LANG TOGGLE (disabled — interface is permanently in Arabic) ── */
+.lang-bar { display:none; }
 
 /* ── MAIN MENU ── */
 .main-menu { padding:8px 16px; display:flex; flex-direction:column; gap:12px; }
@@ -1166,16 +1136,6 @@ input[type=range]:hover::-webkit-slider-thumb { transform:scale(1.15); }
   </button>
 </header>
 
-<!-- ══════════ LANG TOGGLE ══════════ -->
-<div class="lang-bar">
-  <span class="lang-label" id="langLabel">EN</span>
-  <label class="lang-toggle">
-    <input type="checkbox" id="langSwitch" onchange="toggleLang(this)"/>
-    <div class="lang-track"></div>
-    <div class="lang-thumb" id="langThumb">AR</div>
-  </label>
-</div>
-
 <!-- ══════════ MAIN MENU ══════════ -->
 <div class="main-menu">
 
@@ -1661,36 +1621,23 @@ const USER_ID = new URLSearchParams(window.location.search).get('uid');
 const API_BASE = 'https://YOUR-SERVER.com'; // to be changed later
 
 /* ══════════════════════════════════
-   LANGUAGE SYSTEM
+   LANGUAGE SYSTEM — permanently Arabic
 ══════════════════════════════════ */
-let isAR = false;
+const isAR = true;
 
-function toggleLang(cb) {
-  isAR = cb.checked;
+// Apply Arabic translations once DOM is ready
+document.addEventListener('DOMContentLoaded', function applyArabic() {
   const html = document.documentElement;
-  html.lang = isAR ? 'ar' : 'en';
-  html.dir  = isAR ? 'rtl' : 'ltr';
-  document.getElementById('langLabel').textContent = isAR ? 'AR' : 'EN';
-  document.getElementById('langThumb').textContent = isAR ? 'EN' : 'AR';
-
-  document.querySelectorAll('[data-en]').forEach(el => {
-    const val = isAR ? el.dataset.ar : el.dataset.en;
+  html.lang = 'ar';
+  html.dir  = 'rtl';
+  document.querySelectorAll('[data-ar]').forEach(el => {
+    const val = el.dataset.ar;
     if (val) el.innerHTML = val;
   });
-
-  // placeholder update
   document.querySelectorAll('.msg-input').forEach(ta => {
-    ta.placeholder = isAR ? 'اكتب رسالتك هنا…' : 'Type your message variation…';
+    ta.placeholder = 'اكتب رسالتك هنا…';
   });
-
-  // update pause btn text
-  const pauseSpan = document.querySelector('#pauseBtn span');
-  if (pauseSpan) {
-    const running = !document.getElementById('pauseBtn').classList.contains('paused');
-    if (isAR) pauseSpan.textContent = running ? 'إيقاف' : 'استئناف';
-    else pauseSpan.textContent = running ? 'Pause' : 'Resume';
-  }
-}
+});
 
 /* ══════════════════════════════════
    PAUSE / RESUME
@@ -1896,60 +1843,76 @@ async function launchCampaign() {
 }
 
 /* ══════════════════════════════════
-   FETCH GROUPS FROM API
+   FETCH GROUPS — renders the 24 built-in groups statically
+   (no backend required; swap API_BASE call in when server is ready)
 ══════════════════════════════════ */
-async function fetchGroups() {
-  const list = document.querySelector('.modal-group-list');
-  const bigNum = document.querySelector('.groups-counter-card .big-num');
+const STATIC_GROUPS = [
+  { id:'grp_crypto_signals_vip',   icon:'🚀', name:'Crypto Signals VIP',      members:18240, bg:'#1a1a2a' },
+  { id:'grp_forex_masters_hub',    icon:'💰', name:'Forex Masters Hub',         members:9871,  bg:'#1a2a1a' },
+  { id:'grp_nft_drop_alerts',      icon:'🔥', name:'NFT Drop Alerts',           members:5503,  bg:'#2a1a1a' },
+  { id:'grp_ai_tools_prompts',     icon:'🤖', name:'AI Tools & Prompts',        members:31100, bg:'#1a1a2a' },
+  { id:'grp_stock_market_elite',   icon:'📈', name:'Stock Market Elite',        members:12680, bg:'#2a2a1a' },
+  { id:'grp_trading_pros_arabic',  icon:'🎯', name:'Trading Pros Arabic',       members:7220,  bg:'#2a1a2a' },
+  { id:'grp_defi_whales_club',     icon:'💎', name:'DeFi Whales Club',          members:4890,  bg:'#1a2a2a' },
+  { id:'grp_binance_arabic',       icon:'💛', name:'Binance Arabic Community',  members:22400, bg:'#2a2a1a' },
+  { id:'grp_bitcoin_mena',         icon:'₿',  name:'Bitcoin MENA',              members:15700, bg:'#2a1a1a' },
+  { id:'grp_web3_builders_ar',     icon:'🌐', name:'Web3 Builders AR',          members:8900,  bg:'#1a1a2a' },
+  { id:'grp_altcoin_gems',         icon:'💡', name:'Altcoin Gems',              members:6350,  bg:'#1a2a2a' },
+  { id:'grp_pump_signals_vip',     icon:'📡', name:'Pump Signals VIP',          members:11200, bg:'#2a1a2a' },
+  { id:'grp_gold_forex_arabic',    icon:'🥇', name:'Gold & Forex Arabic',       members:9100,  bg:'#2a2a1a' },
+  { id:'grp_trading_academy_ar',   icon:'🎓', name:'Trading Academy AR',        members:17800, bg:'#1a2a1a' },
+  { id:'grp_crypto_news_ar',       icon:'📰', name:'Crypto News AR',            members:28500, bg:'#1a1a2a' },
+  { id:'grp_nft_arabic_market',    icon:'🖼️', name:'NFT Arabic Market',        members:4200,  bg:'#2a1a1a' },
+  { id:'grp_metaverse_arabic',     icon:'🥽', name:'Metaverse Arabic',          members:6700,  bg:'#1a2a2a' },
+  { id:'grp_scalping_masters',     icon:'⚡', name:'Scalping Masters',          members:8400,  bg:'#2a1a2a' },
+  { id:'grp_passive_income_ar',    icon:'💸', name:'Passive Income Arabic',     members:13600, bg:'#1a2a1a' },
+  { id:'grp_options_trading_ar',   icon:'📊', name:'Options Trading Arabic',    members:5900,  bg:'#2a2a1a' },
+  { id:'grp_ipo_alerts_arabic',    icon:'🏦', name:'IPO Alerts Arabic',         members:7300,  bg:'#1a1a2a' },
+  { id:'grp_real_estate_invest',   icon:'🏠', name:'Real Estate & Invest AR',   members:10200, bg:'#2a1a1a' },
+  { id:'grp_economic_calendar_ar', icon:'📅', name:'Economic Calendar AR',      members:9800,  bg:'#1a2a2a' },
+  { id:'grp_vip_signals_mena',     icon:'👑', name:'VIP Signals MENA',          members:19500, bg:'#2a1a2a' },
+];
+
+function fetchGroups() {
+  const list      = document.querySelector('.modal-group-list');
+  const bigNum    = document.querySelector('.groups-counter-card .big-num');
   const availSpan = document.querySelector('.gfi-item:last-child span');
   if (!list) return;
 
-  // Show loading state
-  list.innerHTML = `<div style="text-align:center;padding:32px 0;color:var(--muted);font-family:'DM Mono',monospace;font-size:12px;">
-    <div style="margin-bottom:10px;font-size:22px;">📡</div>
-    ${isAR ? 'جارٍ تحميل المجموعات…' : 'Fetching groups…'}
-  </div>`;
+  const groups = STATIC_GROUPS;
+  const total  = groups.length;
 
-  try {
-    const res = await fetch(`${API_BASE}/api/groups?uid=${encodeURIComponent(USER_ID)}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const groups = await res.json(); // expected: [{id, name, members, icon}, ...]
+  if (bigNum)    bigNum.textContent    = total;
+  if (availSpan) availSpan.textContent = total;
 
-    if (bigNum)    bigNum.textContent   = groups.length;
-    if (availSpan) availSpan.textContent = groups.length;
+  // Rebuild the list (preserving any already-added state via data-group-id)
+  const alreadyAdded = new Set(
+    Array.from(document.querySelectorAll('.btn-add-group.added'))
+         .map(b => b.closest('.modal-group-item')?.dataset.groupId)
+         .filter(Boolean)
+  );
 
-    list.innerHTML = '';
-    const iconColors = ['#1a1a2a','#1a2a1a','#2a1a1a','#2a2a1a','#1a2a2a','#2a1a2a'];
-    groups.forEach((g, i) => {
-      const item = document.createElement('div');
-      item.className = 'modal-group-item';
-      item.dataset.groupId = g.id;
-      item.innerHTML = `
-        <div class="mg-icon" style="background:${iconColors[i % iconColors.length]};">${g.icon || '📢'}</div>
-        <div class="mg-info">
-          <div class="mg-name">${escapeHtml(g.name)}</div>
-          <div class="mg-sub">${(g.members || 0).toLocaleString()} <span data-en="members" data-ar="عضو">${isAR ? 'عضو' : 'members'}</span></div>
-        </div>
-        <button class="btn-add-group" onclick="addGroup(this)">+</button>`;
-      list.appendChild(item);
-    });
+  list.innerHTML = '';
+  groups.forEach(g => {
+    const item = document.createElement('div');
+    item.className = 'modal-group-item';
+    item.dataset.groupId = g.id;
+    const isAdded = alreadyAdded.has(g.id);
+    item.innerHTML = `
+      <div class="mg-icon" style="background:${g.bg};">${g.icon}</div>
+      <div class="mg-info">
+        <div class="mg-name">${escapeHtml(g.name)}</div>
+        <div class="mg-sub">${g.members.toLocaleString()} <span data-ar="عضو">عضو</span></div>
+      </div>
+      <button class="btn-add-group${isAdded ? ' added' : ''}" onclick="addGroup(this)">${isAdded ? '✓' : '+'}</button>`;
+    list.appendChild(item);
+  });
 
-    // Update main menu subtitle
-    const menuSub = document.querySelector('.menu-btn.purple .menu-sub span');
-    if (menuSub) {
-      menuSub.dataset.en = `${groups.length} groups fetched`;
-      menuSub.dataset.ar = `${groups.length} مجموعة محملة`;
-      menuSub.textContent = isAR ? `${groups.length} مجموعة محملة` : `${groups.length} groups fetched`;
-    }
-
-  } catch (err) {
-    console.error('fetchGroups error:', err);
-    list.innerHTML = `<div style="text-align:center;padding:32px 16px;color:var(--danger);font-family:'DM Mono',monospace;font-size:11px;">
-      ⚠ ${isAR ? 'تعذّر تحميل المجموعات. تحقق من الاتصال.' : 'Failed to load groups. Check your connection.'}<br><br>
-      <button onclick="fetchGroups()" style="padding:7px 16px;border-radius:99px;border:1px solid var(--purple);background:#a259ff15;color:var(--purple);font-family:var(--font-main);font-size:12px;cursor:pointer;">
-        ${isAR ? 'إعادة المحاولة' : 'Retry'}
-      </button>
-    </div>`;
+  // Update main menu subtitle
+  const menuSub = document.querySelector('.menu-btn.purple .menu-sub span');
+  if (menuSub) {
+    menuSub.dataset.ar = `${total} مجموعة محملة`;
+    menuSub.textContent = `${total} مجموعة محملة`;
   }
 }
 
@@ -2058,7 +2021,7 @@ setInterval(() => {
   if (document.getElementById('modal-analytics').classList.contains('open')) pushLog();
 }, 4000);
 
-// Scroll log to bottom when modal opens + trigger API fetches
+// Scroll log to bottom when modal opens + trigger fetches
 const _origOpen = window.openModal;
 window.openModal = function(id) {
   _origOpen(id);
@@ -2068,7 +2031,7 @@ window.openModal = function(id) {
     fetchStats(); // load fresh stats immediately on open
   }
   if (id === 'groups') {
-    fetchGroups(); // load groups from API on open
+    fetchGroups(); // render groups list on open
   }
 };
 
