@@ -20,13 +20,11 @@ BASE_URL = os.environ.get("BASE_URL", "")
 app = Flask(__name__)
 sessions = {}
 user_tokens = {}
-
-PHONE, CODE, PASSWORD = range(3)
-
-# كل يوزر عنده loop خاص فيه
 user_loops = {}
 user_clients = {}
 user_code_hash = {}
+
+PHONE, CODE, PASSWORD = range(3)
 
 def get_user_loop(user_id):
     if user_id not in user_loops:
@@ -155,6 +153,7 @@ def send_messages():
 def run_bot():
     async def start_bot():
         application = Application.builder().token(BOT_TOKEN).build()
+        await application.bot.delete_webhook(drop_pending_updates=True)
         conv = ConversationHandler(
             entry_points=[CommandHandler("start", start)],
             states={
