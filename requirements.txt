@@ -1,4 +1,5 @@
 flask
 python-telegram-bot==21.9
-telethon
+pyrogram
+tgcrypto
 nest_asyncio
