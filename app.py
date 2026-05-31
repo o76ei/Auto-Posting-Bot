@@ -1,5 +1,5 @@
 import os
-import asyncio
+import secrets
 from flask import Flask, request, jsonify, send_file
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
@@ -14,13 +14,13 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
-DASHBOARD_CODE = os.environ.get("DASHBOARD_CODE", "1234")
 BASE_URL = os.environ.get("BASE_URL", "")
 
 app = Flask(__name__)
 sessions = {}
+user_tokens = {}
 
-PHONE, CODE, PASSWORD, DASHBOARD = range(4)
+PHONE, CODE, PASSWORD = range(3)
 
 # ── BOT HANDLERS ──
 
@@ -50,16 +50,13 @@ async def get_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     client = context.user_data["client"]
     try:
         await client.sign_in(phone, code)
-        # نجح بدون 2FA
         return await finish_login(update, context, client)
     except SessionPasswordNeededError:
-        # عنده مصادقة ثنائية
         await update.message.reply_text(
             "🔐 حسابك عنده مصادقة ثنائية!\n\n"
             "أرسل كلمة المرور بشكل مفرق\n"
-            "مثال: إذا كلمتك `hello123` أرسلها هكذا:\n"
-            "`h e l l o 1 2 3`\n\n"
-            "⚠️ افرق كل حرف برسالة او بمسافة"
+            "مثال: إذا كلمتك hello123 أرسلها:\n"
+            "h e l l o 1 2 3"
         )
         return PASSWORD
     except Exception as e:
@@ -68,21 +65,14 @@ async def get_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw = update.message.text.strip()
-    
-    # نحذف المسافات ونجمع الحروف
-    # مثال: "h e l l o 1 2 3" تصير "hello123"
-    # مثال: "3 4 5 9 3 9 3" تصير "3459393"
     password = raw.replace(" ", "")
-    
     client = context.user_data["client"]
-    phone = context.user_data["phone"]
-    
     try:
         await client.sign_in(password=password)
         return await finish_login(update, context, client)
     except Exception as e:
         await update.message.reply_text(
-            f"❌ كلمة المرور خاطئة\n"
+            "❌ كلمة المرور خاطئة\n"
             "حاول مرة ثانية، تذكر تفرق الحروف بمسافات:"
         )
         return PASSWORD
@@ -92,12 +82,13 @@ async def finish_login(update: Update, context: ContextTypes.DEFAULT_TYPE, clien
     session_str = client.session.save()
     sessions[phone] = session_str
     user_id = update.effective_user.id
-    dashboard_url = f"{BASE_URL}/dashboard?user={user_id}&code={DASHBOARD_CODE}"
+    token = secrets.token_hex(16)
+    user_tokens[user_id] = token
+    dashboard_url = f"{BASE_URL}/dashboard?token={token}"
     keyboard = [[InlineKeyboardButton("🚀 افتح لوحة التحكم", url=dashboard_url)]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
         "✅ تم تسجيل الدخول بنجاح!\n\nاضغط الزر لفتح لوحة التحكم:",
-        reply_markup=reply_markup
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return ConversationHandler.END
 
@@ -113,8 +104,8 @@ def index():
 
 @app.route("/dashboard")
 def dashboard():
-    code = request.args.get("code")
-    if code != DASHBOARD_CODE:
+    token = request.args.get("token")
+    if not token or token not in user_tokens.values():
         return "غير مصرح", 403
     return send_file("index.html")
 
@@ -122,14 +113,16 @@ def dashboard():
 def send_messages():
     data = request.json
     phone = data.get("phone")
-    session_str = sessions.get(phone)
-    if not session_str:
+    if not sessions.get(phone):
         return jsonify({"error": "لا توجد جلسة"}), 401
     return jsonify({"status": "ok"})
 
 # ── MAIN ──
 
 def run_bot():
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     application = Application.builder().token(BOT_TOKEN).build()
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -141,7 +134,7 @@ def run_bot():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
     application.add_handler(conv)
-    application.run_polling()
+    loop.run_until_complete(application.run_polling())
 
 if __name__ == "__main__":
     import threading
