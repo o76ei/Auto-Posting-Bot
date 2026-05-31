@@ -15,7 +15,7 @@ API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
 BASE_URL = os.environ.get("BASE_URL", "")
 
-app = Flask(__name__)
+flask_app = Flask(__name__)
 sessions = {}
 user_tokens = {}
 user_state = {}
@@ -23,15 +23,11 @@ user_data = {}
 user_clients = {}
 user_code_hash = {}
 
-bot_loop = None
 bot = None
 
 WAIT_PHONE = "WAIT_PHONE"
 WAIT_CODE = "WAIT_CODE"
 WAIT_PASSWORD = "WAIT_PASSWORD"
-
-async def send_msg(chat_id, text, reply_markup=None):
-    await bot.send_message(chat_id, text, reply_markup=reply_markup)
 
 async def handle_start(client, message):
     user_id = message.from_user.id
@@ -44,15 +40,15 @@ async def handle_message(client, message):
     state = user_state.get(user_id)
 
     if state == WAIT_PHONE:
-        await handle_phone(client, message, user_id, text)
+        await handle_phone(message, user_id, text)
     elif state == WAIT_CODE:
-        await handle_code(client, message, user_id, text)
+        await handle_code(message, user_id, text)
     elif state == WAIT_PASSWORD:
-        await handle_password(client, message, user_id, text)
+        await handle_password(message, user_id, text)
     else:
         await message.reply("اكتب /start للبدء")
 
-async def handle_phone(client, message, user_id, phone):
+async def handle_phone(message, user_id, phone):
     user_data[user_id] = {"phone": phone}
     try:
         pyro = Client(
@@ -71,7 +67,7 @@ async def handle_phone(client, message, user_id, phone):
         await message.reply(f"❌ خطأ: {e}\nحاول مرة ثانية /start")
         user_state.pop(user_id, None)
 
-async def handle_code(client, message, user_id, code):
+async def handle_code(message, user_id, code):
     code = code.replace(" ", "")
     phone = user_data[user_id]["phone"]
     pyro = user_clients.get(user_id)
@@ -91,7 +87,7 @@ async def handle_code(client, message, user_id, code):
     except Exception as e:
         await message.reply(f"❌ خطأ: {e}\nأرسل الرمز مرة ثانية:")
 
-async def handle_password(client, message, user_id, password):
+async def handle_password(message, user_id, password):
     password = password.replace(" ", "")
     pyro = user_clients.get(user_id)
     try:
@@ -117,18 +113,18 @@ async def finish_login(message, user_id, pyro):
         reply_markup=keyboard
     )
 
-@app.route("/")
+@flask_app.route("/")
 def index():
     return send_file("index.html")
 
-@app.route("/dashboard")
+@flask_app.route("/dashboard")
 def dashboard():
     token = request.args.get("token")
     if not token or token not in user_tokens.values():
         return "غير مصرح", 403
     return send_file("index.html")
 
-@app.route("/api/send", methods=["POST"])
+@flask_app.route("/api/send", methods=["POST"])
 def send_messages():
     data = request.json
     phone = data.get("phone")
@@ -136,11 +132,11 @@ def send_messages():
         return jsonify({"error": "لا توجد جلسة"}), 401
     return jsonify({"status": "ok"})
 
-def run_bot():
-    global bot, bot_loop
-    bot_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(bot_loop)
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
+async def main():
+    global bot
     bot = Client(
         name="bot",
         api_id=API_ID,
@@ -152,9 +148,12 @@ def run_bot():
     bot.on_message(filters.command("start"))(handle_start)
     bot.on_message(filters.text & ~filters.command("start"))(handle_message)
 
-    bot_loop.run_until_complete(bot.run())
+    t = threading.Thread(target=run_flask, daemon=True)
+    t.start()
+
+    await bot.start()
+    logger.info("البوت شغال ✅")
+    await asyncio.get_event_loop().create_future()
 
 if __name__ == "__main__":
-    t = threading.Thread(target=run_bot, daemon=True)
-    t.start()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    asyncio.run(main())
