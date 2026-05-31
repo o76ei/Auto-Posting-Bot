@@ -2,7 +2,7 @@ import os
 import secrets
 import asyncio
 from flask import Flask, request, jsonify, send_file
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -36,6 +36,8 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = update.message.text.strip()
     context.user_data["phone"] = phone
     try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         client = TelegramClient(StringSession(), API_ID, API_HASH)
         await client.connect()
         await client.send_code_request(phone)
@@ -87,7 +89,7 @@ async def finish_login(update: Update, context: ContextTypes.DEFAULT_TYPE, clien
     dashboard_url = f"{BASE_URL}/dashboard?token={token}"
     keyboard = [[InlineKeyboardButton("🚀 افتح لوحة التحكم", url=dashboard_url)]]
     await update.message.reply_text(
-        "✅ تم تسجيل الدخول!\nاضغط الزر لفتح لوحة التحكم:",
+        "✅ تم تسجيل الدخول بنجاح!\n\nاضغط الزر لفتح لوحة التحكم:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return ConversationHandler.END
@@ -126,7 +128,7 @@ def send_messages():
         return jsonify({"error": "لا توجد جلسة"}), 401
     return jsonify({"status": "ok"})
 
-# ── SETUP WEBHOOK ──
+# ── SETUP ──
 
 async def setup():
     global application
