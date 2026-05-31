@@ -37,7 +37,8 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = update.message.text.strip()
     context.user_data["phone"] = phone
     try:
-        client = TelegramClient(StringSession(), API_ID, API_HASH)
+        loop = asyncio.get_event_loop()
+        client = TelegramClient(StringSession(), API_ID, API_HASH, loop=loop)
         await client.connect()
         await client.send_code_request(phone)
         context.user_data["client"] = client
@@ -112,7 +113,8 @@ def dashboard():
 def webhook():
     data = request.get_json()
     if application:
-        asyncio.get_event_loop().run_until_complete(
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(
             application.process_update(Update.de_json(data, application.bot))
         )
     return "ok"
@@ -144,5 +146,7 @@ async def setup():
     logger.info(f"Webhook set: {webhook_url}")
 
 if __name__ == "__main__":
-    asyncio.run(setup())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(setup())
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
