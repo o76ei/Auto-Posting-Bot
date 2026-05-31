@@ -55,7 +55,10 @@ async def handle_phone(message, user_id, phone):
             name=f"user_{user_id}",
             api_id=API_ID,
             api_hash=API_HASH,
-            in_memory=True
+            in_memory=True,
+            device_model="iPhone 14",
+            system_version="16.0",
+            app_version="9.0"
         )
         await pyro.connect()
         sent = await pyro.send_code(phone)
