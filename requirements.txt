@@ -2,4 +2,3 @@ flask
 python-telegram-bot==21.9
 pyrogram
 tgcrypto
-nest_asyncio
