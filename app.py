@@ -1,6 +1,7 @@
 import os
 import secrets
 import asyncio
+import nest_asyncio
 from flask import Flask, request, jsonify, send_file
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
@@ -8,6 +9,8 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError
 import logging
+
+nest_asyncio.apply()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,8 +27,6 @@ application = None
 
 PHONE, CODE, PASSWORD = range(3)
 
-# ── BOT HANDLERS ──
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 أهلاً! أرسل رقم هاتفك مع رمز الدولة\nمثال: +9647801234567"
@@ -36,8 +37,6 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = update.message.text.strip()
     context.user_data["phone"] = phone
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         client = TelegramClient(StringSession(), API_ID, API_HASH)
         await client.connect()
         await client.send_code_request(phone)
@@ -98,8 +97,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("تم الإلغاء. اكتب /start للبدء من جديد.")
     return ConversationHandler.END
 
-# ── FLASK ROUTES ──
-
 @app.route("/")
 def index():
     return send_file("index.html")
@@ -115,7 +112,7 @@ def dashboard():
 def webhook():
     data = request.get_json()
     if application:
-        asyncio.run(
+        asyncio.get_event_loop().run_until_complete(
             application.process_update(Update.de_json(data, application.bot))
         )
     return "ok"
@@ -127,8 +124,6 @@ def send_messages():
     if not sessions.get(phone):
         return jsonify({"error": "لا توجد جلسة"}), 401
     return jsonify({"status": "ok"})
-
-# ── SETUP ──
 
 async def setup():
     global application
